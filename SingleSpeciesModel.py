@@ -195,7 +195,7 @@ def equation_run(temp_list, mu_x, beta_x, phi_x, gamma_x, time, runs):
             #establish run-dependant variables
             nuts_val = nuts_init * BCF #seawater values * Brine concentrating factor
             B_init = np.random.randint(Bac_init_lo, Bac_init_hi) * BCF #seawater values * brine concentrating factor
-            V_init = np.random.randint(Vir_init_lo, Vir_init_hi) * B_init #Bacterial concetration times number of viruses (Ratio)       
+            V_init = np.random.randint(Vir_init_lo, Vir_init_hi) * BCF #Bacterial concetration times number of viruses (Ratio)       
        
 
             #initial conditions and integration
