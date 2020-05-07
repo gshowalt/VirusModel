@@ -92,7 +92,7 @@ def f(s,t, beta, mu, phi, gamma):
     dBdt = (mu) * (N/(Q + N)) * B - gamma * phi * V * B - d*B
     if B < 1:
         B = 1
-    dVdt =  gamma*beta * B  - phi * V * B -  m*V
+    dVdt =  gamma*beta*phi*V* B  - phi * V * B -  m*V
     if V < 1:
         V = 1
     #virus term
