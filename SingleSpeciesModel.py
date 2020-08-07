@@ -20,6 +20,8 @@ from itertools import islice, cycle, chain
 from scipy.interpolate import griddata
 from scipy import interpolate
 from scipy.integrate import odeint
+from scipy.stats import ttest_ind
+
 
 import decimal as dc
 from decimal import Decimal
@@ -41,16 +43,21 @@ import sys
 import seaborn as sns
 import pandas as pd
 import math
-from ipywidgets import interact
 
-runs = 10
-time = 100
+import statistics as stats
+
+
+
+""" FIRST, input here your temperature, time, and runs"""
+runs = 100
+time = 2500
 temp_list = (range(-15,-2,1))
 
-mux = 1
+mux = 0.1
 betx = 1
 phix = 1
 gamx = 1
+m = 1e-8
 
 
 """WITHOUT AN INFECTED CLASS"""
@@ -101,17 +108,67 @@ def f(s,t, beta, mu, phi, gamma):
     #POM term
     return [dNdt, dBdt, dVdt, dPdt]
 
-def equation_run(temp_list, mu_x, beta_x, phi_x, gamma_x, time, runs):
+"""WITHOUT AN INFECTED CLASS"""
+def f(s,t, beta, mu, phi, gamma,temp, m):
+   
+    alpha = 1.2e-7*3**((temp-23)/10)#4.2e-7 at +8, or 1.2e-7 at lower temps, at -5 --> mu = 0.25/day = 0.01/hr = 1e-8
+    print (alpha)
+    # alpha is a coefficient that we'd like to change with temperature? Or change eta?
+    #lamb = 0.001 #/(0.1/mu)
+    #latent period/"lysis rate" in per hour
+    #nutrient transfer coefficient to bacteria (ug/cell * hr)
+    Q = 0.022
+    #half saturation constant (ug/mL)
+    #eta = 1e5
+    #conversion rate between uptake and production (cells/ug)
+    d = 0.000001#2 *3**((-temp-23)/10)
+    #constant of bacterial death (1/hr)
+    m = m #1 * 3**((-temp-23)/10)
+    #constant of viral decay (1/hr)
+    g = 0.2
+    #POM transfer coefficient from bacteria (ug/cell*hr)
+    n = 0.99
+    #POM transfer coefficient from viral lysis ug/[burst]cell
+    #gamma is a lysogeny value
+    N = s[0]
+    B = s[1]
+    V = s[2]
+    P = s[3]
+    #systems of equations below
+    if N < 0:
+        N = 0
+    if B < 1:
+        B = 1
+    if V < 1:
+        V = 1
+    gamma = gamma
+    if gamma == 100:
+        gamma = 1/B
+    if gamma ==  1000:
+        gamma = 1/N
+    if gamma == 10000:
+        gamma = mu/(mu+0.1)
+    dNdt = - alpha * (N / (N + Q)) * B + g * (alpha  * (N/(N+Q))*B) + (n * 1e-7 * (gamma) * V * B)
+    if N < 0:
+        N = 0
+    #nutrient term
+    dBdt = (mu) * (N/(Q + N)) * B -  phi * V * B - d*B #(gamma *)
+    if B < 1:
+        B = 1
+    dVdt =  gamma*beta * B * phi*V - phi * V * B -  m*V
+    if V < 1:
+        V = 1
+    #virus term
+    #dPdt = (g * (0.0083*1e-7))*B + (n * 1e-7 * phi * V * B*RCR) + 1e-10*m*V + 1.0e-7*d*B - (P/(P+Q))*alpha * B
+    dPdt = g * alpha  * (N/ (N+Q))*B + n * 1e-7 * (gamma)*phi*B*V
+    #POM term
+   
+    return [dNdt, dBdt, dVdt, dPdt]
+
+def equation_run(temp_list, mu_x, beta_x, phi_x, gamma_x, time, runs, m):
     nuts_val = 0.1
     nuts_init = nuts_val
     t = np.linspace(1,time,1000)
-    DOM = []
-    NUTS = []
-    BAC = []
-    INF = []
-    VIR = []
-    DOM_End = []
-    RATIO = []
     VIRendlist = []
     BACendlist =[]
     INFendlist = []
@@ -120,15 +177,19 @@ def equation_run(temp_list, mu_x, beta_x, phi_x, gamma_x, time, runs):
     gamma_list2 = []
     Bac_init_lo = 1e4
     Bac_init_hi = 1e6
-    Vir_init_lo = 1
+    Vir_init_lo = 10
     Vir_init_hi = 100
-    beta_list2 = []
-    phi_list2 = []
-    mu_list2 = []
-
+    Meanratio = []
+    Stdratio = []
 
     for j in range(0, len(temp_list)):
+        Ratio = []
         temp = temp_list[j]
+        
+        beta_list2 = []
+        phi_list2 = []
+        mu_list2 = []
+
 
         if temp < -1:
             RCR = 0.0716*temp**4 + 2.9311*temp**3 + 34.108*temp**2 + 45.826*temp + 3.5125 #Fit from Wells and Deming, 2006
@@ -177,7 +238,12 @@ def equation_run(temp_list, mu_x, beta_x, phi_x, gamma_x, time, runs):
                 mu = 0.001
             mu_list.append(mu)
             mu_list2.append(mu)
-
+         
+            if gamma > 1:
+                gamma = 1
+            gamma_list.append(gamma)
+            gamma_list2.append(gamma)
+            
             phi = phi_x*np.random.normal(phi_mu, phi_std)
             phi = phi * RCR
             if phi < 0:
@@ -185,22 +251,22 @@ def equation_run(temp_list, mu_x, beta_x, phi_x, gamma_x, time, runs):
             phi_list.append(phi)
             phi_list2.append(phi/RCR)
 
-            gamma = gamma_x*mu
-            if gamma > 1:
-                gamma = 1
-            gamma_list.append(gamma)
-            gamma_list2.append(gamma)
-
-        for i in range(0, runs):
-            #establish run-dependant variables
+           #establish run-dependant variables
             nuts_val = nuts_init * BCF #seawater values * Brine concentrating factor
             B_init = np.random.randint(Bac_init_lo, Bac_init_hi) * BCF #seawater values * brine concentrating factor
             V_init = np.random.randint(Vir_init_lo, Vir_init_hi) * B_init #Bacterial concetration times number of viruses (Ratio)       
-       
+            
+            DOM = []
+            NUTS = []
+            BAC = []
+            INF = []
+            VIR = []
+            DOM_End = []
+            RATIO = []
 
             #initial conditions and integration
             s0=[nuts_val, B_init, V_init,0]
-            s = odeint(f,s0,t, args = (beta_list[i], mu_list[i], phi_list[i], gamma_list[i]))
+            s = odeint(f,s0,t, args = (beta_list[i], mu_list[i], phi_list[i], gamma_list[i],temp, m))
 
             #manipulate data into form wanted
             NUTS = NUTS + list(x for x in s[:,0])
@@ -214,7 +280,14 @@ def equation_run(temp_list, mu_x, beta_x, phi_x, gamma_x, time, runs):
             VIRendlist.append(VIRend)
             BACendlist.append(BACend)
             Totalendlist.append((BACend))
-    return [Totalendlist, VIRendlist, gamma_list2]
+            Ratio.append(VIRend/BACend)
+       # Ratio, rejectcount = reject_outliers(Ratio)
+       # print (rejectcount)
+        Stdratio.append(stats.stdev(Ratio))
+        Meanratio.append(stats.mean(Ratio))
+    return [Totalendlist, VIRendlist, gamma_list2, Stdratio, Meanratio]
+
+
 
 """ Run the functions"""
 # --------  Run Model and Plot it -------- #
