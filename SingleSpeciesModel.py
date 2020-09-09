@@ -49,130 +49,66 @@ import statistics as stats
 
 
 """ FIRST, input here your temperature, time, and runs"""
-runs = 100
-time = 2500
-temp_list = (range(-15,-2,1))
+runs = 100                    # number of runs of the model
+time = 2500                   # time in hours
+temp_list = (range(-15,-2,1)) # the range of temperatures over which you'd like the model to step
 
-mux = 0.1
-betx = 1
-phix = 1
-gamx = 1
-m = 1e-8
+# Here, input scaling factors for models as desired to tune the parameter dstributions up or down
+mux = 1                       # scaling growth rate
+betx = 1                      # scaling burst size
+phix = 1                      # scaling adsorption rate
+gamx = 1                      # scaling lytic fraction
+
+# This is the value for viral decay rate
+m = 1e-8                      # (hr^-1)
 
 
-"""WITHOUT AN INFECTED CLASS"""
-def f(s,t, beta, mu, phi, gamma):
-    alpha = 1.2e-7 #4.2e-7 at +8, or 1.2e-7 at lower temps, at -5 --> mu = 0.25/day = 0.01/hr = 1e-8
-    # alpha is a coefficient that we'd like to change with temperature? Or change eta?
-    lamb = 0.001 #/(0.1/mu)
-    #latent period/"lysis rate" in per hour
-    #nutrient transfer coefficient to bacteria (ug/cell * hr)
-    Q = 0.022
-    #half saturation constant (ug/mL)
-    #eta = 1e5
-    #conversion rate between uptake and production (cells/ug)
-    d = 0.002
-    #constant of bacterial death (1/hr)
-    m = 0.0001
-    #constant of viral decay (1/hr)
-    g = 0.2
-    #POM transfer coefficient from bacteria (ug/cell*hr)
-    n = 0.99
-    #POM transfer coefficient from viral lysis ug/[burst]cell
-    #gamma is a lysogeny value
-    N = s[0]
-    B = s[1]
-    V = s[2]
-    P = s[3]
-    #systems of equations below
-    if N < 0:
-        N = 0
-    if B < 1:
-        B = 1
-    if V < 1:
-        V = 1
-    gamma = (gamma)/(mu+0.1)
-    dNdt = - alpha * (N / (N + Q)+ P/(Q+P)) * B + g * (alpha  * (N/(N+Q))*B) + (n * 1e-7 * (gamma) * V * B)
-    if N < 0:
-        N = 0
-    #nutrient term
-    dBdt = (mu) * (N/(Q + N)) * B - gamma * phi * V * B - d*B
-    if B < 1:
-        B = 1
-    dVdt =  gamma*beta*phi*V* B  - phi * V * B -  m*V
-    if V < 1:
-        V = 1
-    #virus term
-    #dPdt = (g * (0.0083*1e-7))*B + (n * 1e-7 * phi * V * B*RCR) + 1e-10*m*V + 1.0e-7*d*B - (P/(P+Q))*alpha * B
-    dPdt = g * alpha  * (N/ (N+Q))*B + n * 1e-7 * (1-gamma)*phi*B*V
-    #POM term
-    return [dNdt, dBdt, dVdt, dPdt]
 
-"""WITHOUT AN INFECTED CLASS"""
 def f(s,t, beta, mu, phi, gamma,temp, m):
-   
-    alpha = 1.2e-7*3**((temp-23)/10)#4.2e-7 at +8, or 1.2e-7 at lower temps, at -5 --> mu = 0.25/day = 0.01/hr = 1e-8
-    print (alpha)
-    # alpha is a coefficient that we'd like to change with temperature? Or change eta?
-    #lamb = 0.001 #/(0.1/mu)
-    #latent period/"lysis rate" in per hour
-    #nutrient transfer coefficient to bacteria (ug/cell * hr)
-    Q = 0.022
-    #half saturation constant (ug/mL)
-    #eta = 1e5
-    #conversion rate between uptake and production (cells/ug)
-    d = 0.000001#2 *3**((-temp-23)/10)
-    #constant of bacterial death (1/hr)
-    m = m #1 * 3**((-temp-23)/10)
-    #constant of viral decay (1/hr)
-    g = 0.2
-    #POM transfer coefficient from bacteria (ug/cell*hr)
-    n = 0.99
-    #POM transfer coefficient from viral lysis ug/[burst]cell
-    #gamma is a lysogeny value
+"""Establishes function f which holds the differential equations simulating change in virus and bacterial concentration
+as the result of several processes""" 
+    
+    alpha = 1.2e-7*3**((temp-23)/10) # alpha is the uptake constant hr^-1
+    Q = 0.022                 # half saturation constant (ug/mL)
+    d = 0.000001              # constant of bacterial death (1/hr)
+    m = m                     # constant of viral decay (1/hr)
+    g = 0.2                   # fraction of uptake material recycled into nutrient pool as exudate (0-1, no units)
+    n = 0.99                  # fraction of viral lysis material recycling into nutrient pool (0-1, no units)
+
     N = s[0]
     B = s[1]
     V = s[2]
     P = s[3]
-    #systems of equations below
-    if N < 0:
-        N = 0
-    if B < 1:
-        B = 1
-    if V < 1:
-        V = 1
-    gamma = gamma
-    if gamma == 100:
-        gamma = 1/B
-    if gamma ==  1000:
-        gamma = 1/N
-    if gamma == 10000:
-        gamma = mu/(mu+0.1)
+   
+
+    # dNdt refers to the change in DOM over time
+    #       -------- uptake  ---------    --- recycled, exudate ---    --- recycled from lysis ---
     dNdt = - alpha * (N / (N + Q)) * B + g * (alpha  * (N/(N+Q))*B) + (n * 1e-7 * (gamma) * V * B)
-    if N < 0:
-        N = 0
-    #nutrient term
-    dBdt = (mu) * (N/(Q + N)) * B -  phi * V * B - d*B #(gamma *)
-    if B < 1:
-        B = 1
-    dVdt =  gamma*beta * B * phi*V - phi * V * B -  m*V
-    if V < 1:
-        V = 1
-    #virus term
-    #dPdt = (g * (0.0083*1e-7))*B + (n * 1e-7 * phi * V * B*RCR) + 1e-10*m*V + 1.0e-7*d*B - (P/(P+Q))*alpha * B
-    dPdt = g * alpha  * (N/ (N+Q))*B + n * 1e-7 * (gamma)*phi*B*V
-    #POM term
+
+    # dBdt refers to the change in bacterial population over time
+    #       ------ growth ------    - infection -  - death -
+    dBdt = (mu) * (N/(Q + N)) * B -  phi * V * B - d * B 
+
+    # dVdt refers to the change in virus concentration over time
+    #       --------- lysis ----------  - infection - - death -
+    dVdt =  gamma * beta * phi* V * B - phi * V * B -  m * V
+   
+    # dPdt refers to the change in recycled DOM concentration; this equation simply tallies the overall value (note it cannot be < 0)
+    #      ---- recycled, exudate ----   --- recycled from lysis ---
+    dPdt = g * alpha  * (N/ (N+Q)) * B + n * 1e-7 * (gamma)*phi*B*V
    
     return [dNdt, dBdt, dVdt, dPdt]
 
 def equation_run(temp_list, mu_x, beta_x, phi_x, gamma_x, time, runs, m):
-    nuts_val = 0.1
-    nuts_init = nuts_val
-    t = np.linspace(1,time,1000)
-    VIRendlist = []
-    BACendlist =[]
-    INFendlist = []
-    Totalendlist = []
+"""Establish function equation_run which solves DiffEq function f over several runs and 
+temperatures, with certain parameter values as function of temperature """
+
+    nuts_val = 0.1                  # initial nutrient value
+    nuts_init = nuts_val            # #
+    t = np.linspace(1,time,1000)    # create vector for time with 1000 steps 
+    VIRendlist = []                 # build initial list for virus values
+    BACendlist =[]                  # build initial list for bacteria values
+    Totalendlist = []               # build final list for bacterial values
     DOM_Sum = []
     gamma_list2 = []
     Bac_init_lo = 1e4
@@ -224,6 +160,7 @@ def equation_run(temp_list, mu_x, beta_x, phi_x, gamma_x, time, runs, m):
         #phi_std = -2e-11*sal**2 + 4e-9*sal - 9e-8
         if phi_std < 0:
             phi_std = 0
+    
     # RUN THROUGH THE NUMBER OF RUNS
     #first make a list of the temperature-depdendant parameters so it exists in entirety
         for i in range(0, runs):
